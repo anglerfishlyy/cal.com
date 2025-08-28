@@ -127,7 +127,7 @@ export class QualifiedHostsService {
             createdAt: h.createdAt || new Date(),
             ...(h.priority !== undefined ? { priority: h.priority } : {}),
             ...(h.weight !== undefined ? { weight: h.weight } : {}),
-            ...(h.groupId !== undefined ? { groupId: h.groupId } : {}),
+            groupId: h.groupId ?? null,
           })),
         }
       : eventType;
@@ -144,12 +144,14 @@ export class QualifiedHostsService {
         // keep tests expecting original shape (email present, no groupId/priority/weight)
         email: (h as any).email,
         createdAt: h.createdAt ?? null,
+        groupId: null,
       }));
       const roundRobinHosts = fallbackUsers.filter(isRoundRobinHost).map((h) => ({
         isFixed: false,
         user: h.user,
         // Keep shape similar to input rr hosts (no priority/weight/groupId fields when undefined)
         createdAt: h.createdAt ?? null,
+        groupId: null,
       }));
       return { qualifiedRRHosts: roundRobinHosts, fixedHosts };
     }
@@ -167,7 +169,7 @@ export class QualifiedHostsService {
       ...(h.priority !== undefined ? { priority: h.priority ?? null } : {}),
       ...(h.weight !== undefined ? { weight: h.weight ?? null } : {}),
       createdAt: h.createdAt ?? null,
-      ...(h.groupId !== undefined ? { groupId: h.groupId ?? null } : {}),
+      groupId: h.groupId ?? null,
     }));
     const roundRobinHosts = normalizedHostsWithFixedBoolean.filter(isRoundRobinHost).map((h) => ({
       isFixed: false,
@@ -175,7 +177,7 @@ export class QualifiedHostsService {
       ...(h.priority !== undefined ? { priority: h.priority ?? null } : {}),
       ...(h.weight !== undefined ? { weight: h.weight ?? null } : {}),
       createdAt: h.createdAt ?? null,
-      ...(h.groupId !== undefined ? { groupId: h.groupId ?? null } : {}),
+      groupId: h.groupId ?? null,
     }));
 
     // If it is rerouting, we should not force reschedule with same host.
@@ -200,14 +202,7 @@ export class QualifiedHostsService {
       hostsAfterRescheduleWithSameRoundRobinHost,
       (await findMatchingHostsWithEventSegment({
         eventType,
-        hosts: hostsAfterRescheduleWithSameRoundRobinHost.map((h) => ({
-          // tests expect only known fields; avoid adding groupId/priority/weight when undefined
-          isFixed: h.isFixed,
-          user: h.user,
-          createdAt: h.createdAt,
-          ...(h.priority !== undefined ? { priority: h.priority } : {}),
-          ...(h.weight !== undefined ? { weight: h.weight } : {}),
-        })),
+        hosts: hostsAfterRescheduleWithSameRoundRobinHost,
       })) as typeof hostsAfterRescheduleWithSameRoundRobinHost
     );
 
