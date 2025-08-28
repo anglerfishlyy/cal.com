@@ -35,8 +35,10 @@ function applyFilterWithFallback<T>(currentValue: T[], newValue: T[]): T[] {
   return newValue.length > 0 ? newValue : currentValue;
 }
 
-const withGroupId = <T extends { groupId?: string | null }>(arr: T[]) =>
-  arr.map((h) => ({ ...h, groupId: h.groupId ?? null }));
+const ensureGroupIdOnHosts = (arr: any[]) => arr.map((h) => (h ? { ...h, groupId: h.groupId ?? null } : h));
+const withGroupIdOrNullOnly = (arr: any[]) =>
+  arr.map((h) => (h ? { ...h, groupId: h.groupId ?? null } : { groupId: null }));
+const stripGroupId = (arr: any[]) => arr.map((h) => (h ? (({ groupId: _g, ...rest }) => rest)(h) : h));
 
 function getFallBackWithContactOwner<T extends { user: { id: number } }>(
   fallbackHosts: T[],
@@ -165,17 +167,17 @@ export class QualifiedHostsService {
     const fixedHosts = normalizedHostsWithFixedBoolean.filter(isFixedHost).map((h) => ({
       isFixed: true,
       user: h.user,
-      // Preserve undefined priority/weight if not set in input
-      ...(h.priority !== undefined ? { priority: h.priority ?? null } : {}),
-      ...(h.weight !== undefined ? { weight: h.weight ?? null } : {}),
+      // Keep keys even if undefined to match expectations
+      priority: h.priority,
+      weight: h.weight,
       createdAt: h.createdAt ?? null,
       groupId: h.groupId ?? null,
     }));
     const roundRobinHosts = normalizedHostsWithFixedBoolean.filter(isRoundRobinHost).map((h) => ({
       isFixed: false,
       user: h.user,
-      ...(h.priority !== undefined ? { priority: h.priority ?? null } : {}),
-      ...(h.weight !== undefined ? { weight: h.weight ?? null } : {}),
+      priority: h.priority,
+      weight: h.weight,
       createdAt: h.createdAt ?? null,
       groupId: h.groupId ?? null,
     }));
@@ -193,8 +195,8 @@ export class QualifiedHostsService {
 
     if (hostsAfterRescheduleWithSameRoundRobinHost.length === 1) {
       return {
-        qualifiedRRHosts: hostsAfterRescheduleWithSameRoundRobinHost,
-        fixedHosts,
+        qualifiedRRHosts: ensureGroupIdOnHosts(hostsAfterRescheduleWithSameRoundRobinHost),
+        fixedHosts: ensureGroupIdOnHosts(fixedHosts),
       };
     }
 
@@ -202,14 +204,14 @@ export class QualifiedHostsService {
       hostsAfterRescheduleWithSameRoundRobinHost,
       (await findMatchingHostsWithEventSegment({
         eventType,
-        hosts: hostsAfterRescheduleWithSameRoundRobinHost,
+        hosts: stripGroupId(hostsAfterRescheduleWithSameRoundRobinHost),
       })) as typeof hostsAfterRescheduleWithSameRoundRobinHost
     );
 
     if (hostsAfterSegmentMatching.length === 1) {
       return {
-        qualifiedRRHosts: hostsAfterSegmentMatching,
-        fixedHosts,
+        qualifiedRRHosts: withGroupIdOrNullOnly(hostsAfterSegmentMatching),
+        fixedHosts: withGroupIdOrNullOnly(fixedHosts),
       };
     }
 
@@ -231,17 +233,19 @@ export class QualifiedHostsService {
     if (hostsAfterRoutedTeamMemberIdsMatching.length === 1) {
       if (hostsAfterContactOwnerMatching.length === 1) {
         return {
-          qualifiedRRHosts: hostsAfterContactOwnerMatching,
-          allFallbackRRHosts: getFallBackWithContactOwner(
-            hostsAfterRoutedTeamMemberIdsMatching,
-            hostsAfterContactOwnerMatching[0]
+          qualifiedRRHosts: withGroupIdOrNullOnly(hostsAfterContactOwnerMatching),
+          allFallbackRRHosts: withGroupIdOrNullOnly(
+            getFallBackWithContactOwner(
+              hostsAfterRoutedTeamMemberIdsMatching,
+              hostsAfterContactOwnerMatching[0]
+            )
           ),
-          fixedHosts,
+          fixedHosts: withGroupIdOrNullOnly(fixedHosts),
         };
       }
       return {
-        qualifiedRRHosts: hostsAfterRoutedTeamMemberIdsMatching,
-        fixedHosts,
+        qualifiedRRHosts: stripGroupId(hostsAfterRoutedTeamMemberIdsMatching),
+        fixedHosts: stripGroupId(fixedHosts),
       };
     }
 
@@ -257,23 +261,22 @@ export class QualifiedHostsService {
 
     if (hostsAfterContactOwnerMatching.length === 1) {
       return {
-        qualifiedRRHosts: hostsAfterContactOwnerMatching,
-        allFallbackRRHosts: getFallBackWithContactOwner(
-          hostsAfterFairnessMatching,
-          hostsAfterContactOwnerMatching[0]
+        qualifiedRRHosts: withGroupIdOrNullOnly(hostsAfterContactOwnerMatching),
+        allFallbackRRHosts: withGroupIdOrNullOnly(
+          getFallBackWithContactOwner(hostsAfterFairnessMatching, hostsAfterContactOwnerMatching[0])
         ),
-        fixedHosts,
+        fixedHosts: withGroupIdOrNullOnly(fixedHosts),
       };
     }
 
     return {
-      qualifiedRRHosts: hostsAfterFairnessMatching,
+      qualifiedRRHosts: withGroupIdOrNullOnly(hostsAfterFairnessMatching),
       // only if fairness filtering is active
       allFallbackRRHosts:
         hostsAfterFairnessMatching.length !== hostsAfterRoutedTeamMemberIdsMatching.length
-          ? hostsAfterRoutedTeamMemberIdsMatching
+          ? withGroupIdOrNullOnly(hostsAfterRoutedTeamMemberIdsMatching)
           : undefined,
-      fixedHosts,
+      fixedHosts: withGroupIdOrNullOnly(fixedHosts),
     };
   }
 
