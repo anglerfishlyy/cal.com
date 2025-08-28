@@ -8,12 +8,14 @@ import {
   Timezones,
   getDate,
   getGoogleCalendarCredential,
+  mockSuccessfulVideoMeetingCreation,
 } from "@calcom/web/test/utils/bookingScenario/bookingScenario";
 import { getMockRequestDataForBooking } from "@calcom/web/test/utils/bookingScenario/getMockRequestDataForBooking";
 import { setupAndTeardown } from "@calcom/web/test/utils/bookingScenario/setupAndTeardown";
 
 import { describe, expect } from "vitest";
 
+import { appStoreMetadata } from "@calcom/app-store/apps.metadata.generated";
 import { ErrorCode } from "@calcom/lib/errorCodes";
 import { SchedulingType } from "@calcom/prisma/enums";
 import { test } from "@calcom/web/test/fixtures/fixtures";
@@ -105,6 +107,12 @@ describe("handleNewBooking - Round Robin Host Validation", () => {
       });
 
       await createBookingScenario(scenarioData);
+
+      // Ensure video app is mocked to avoid unrelated appStore errors
+      mockSuccessfulVideoMeetingCreation({
+        metadataLookupKey: appStoreMetadata.dailyvideo.dirName,
+        videoMeetingData: { id: "MOCK_ID", password: "MOCK_PASS", url: "http://mock-dailyvideo/meeting" },
+      });
 
       mockCalendar("googlecalendar", {
         create: {

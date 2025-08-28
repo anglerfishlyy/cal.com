@@ -100,9 +100,9 @@ describe("findQualifiedHostsWithDelegationCredentials", async () => {
 
     // Verify the result
     expect(result).toStrictEqual({
-      qualifiedRRHosts: rrHostsAfterFairness,
-      fixedHosts,
-      allFallbackRRHosts: rrHosts,
+      qualifiedRRHosts: rrHostsAfterFairness.map((h) => ({ ...h, groupId: null })),
+      fixedHosts: fixedHosts.map((h) => ({ ...h, groupId: null })),
+      allFallbackRRHosts: rrHosts.map((h) => ({ ...h, groupId: null })),
     });
   });
 
@@ -158,6 +158,7 @@ describe("findQualifiedHostsWithDelegationCredentials", async () => {
         isFixed: true,
         email: user.email,
         createdAt: null,
+        groupId: null,
       })),
     });
 
@@ -242,9 +243,10 @@ describe("findQualifiedHostsWithDelegationCredentials", async () => {
       qualifiedRRHosts: [
         {
           ...hosts[0],
+          groupId: null,
         },
       ],
-      allFallbackRRHosts: hosts,
+      allFallbackRRHosts: hosts.map((h) => ({ ...h, groupId: null })),
       fixedHosts: [],
     });
   });
@@ -328,8 +330,11 @@ describe("findQualifiedHostsWithDelegationCredentials", async () => {
 
     // Verify the result
     expect(result).toEqual({
-      qualifiedRRHosts: [hosts[2]],
-      allFallbackRRHosts: [hosts[0], hosts[2]],
+      qualifiedRRHosts: [{ ...hosts[2], groupId: null }],
+      allFallbackRRHosts: [
+        { ...hosts[0], groupId: null },
+        { ...hosts[2], groupId: null },
+      ],
       fixedHosts: [],
     });
   });
@@ -405,8 +410,8 @@ describe("findQualifiedHostsWithDelegationCredentials", async () => {
     });
 
     expect(result).toEqual({
-      qualifiedRRHosts: [hosts[1]],
-      fixedHosts: [hosts[2]],
+      qualifiedRRHosts: [{ ...hosts[1], groupId: null }],
+      fixedHosts: [{ ...hosts[2], groupId: null }],
     });
   });
 
@@ -486,7 +491,7 @@ describe("findQualifiedHostsWithDelegationCredentials", async () => {
 
     // Verify the result
     expect(result).toEqual({
-      qualifiedRRHosts: [hosts[0]],
+      qualifiedRRHosts: [{ ...hosts[0], groupId: null }],
       fixedHosts: [],
     });
 
