@@ -125,8 +125,8 @@ export class QualifiedHostsService {
             user: h.user, // Already a user object in this context
             isFixed: h.isFixed ?? false,
             createdAt: h.createdAt || new Date(),
-            ...(h.priority !== undefined ? { priority: h.priority } : {}),
-            ...(h.weight !== undefined ? { weight: h.weight } : {}),
+            priority: (h as any).priority,
+            weight: (h as any).weight,
             groupId: h.groupId ?? null,
           })),
         }
