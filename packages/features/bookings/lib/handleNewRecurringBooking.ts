@@ -73,10 +73,11 @@ export const handleNewRecurringBooking = async (input: BookingHandlerInput): Pro
   for (let key = isRoundRobin ? 1 : 0; key < data.length; key++) {
     const booking = data[key];
     // Disable AppStatus in Recurring Booking Email as it requires us to iterate backwards to be able to compute the AppsStatus for all the bookings except the very first slot and then send that slot's email with statuses
-    // It is also doubtful that how useful is to have the AppsStatus of all the bookings in the email.
+    // It is also doubtful that how useful is to have the AppsStatus of all the bookings except the very first slot and then send that slot's email with statuses
     // It is more important to iterate forward and check for conflicts for only first few bookings defined by 'numSlotsToCheckForAvailability'
     // if (key === 0) {
     //   const calcAppsStatus: { [key: string]: AppsStatus } = createdBookings
+    //     .flatMap((book) => (book.appsStatus !== undefined ? book.appsStatus : []))
     //     .flatMap((book) => (book.appsStatus !== undefined ? book.appsStatus : []))
     //     .reduce((prev, curr) => {
     //       if (prev[curr.type]) {
@@ -99,6 +100,8 @@ export const handleNewRecurringBooking = async (input: BookingHandlerInput): Pro
       numSlotsToCheckForAvailability,
       currentRecurringIndex: key,
       noEmail: input.noEmail !== undefined ? input.noEmail : key !== 0,
+      // Pass luckyUsers for slots within the same recurring event
+      // This ensures all slots in a recurring event go to the same user
       luckyUsers,
     };
 

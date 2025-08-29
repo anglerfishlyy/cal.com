@@ -161,6 +161,14 @@ export class QualifiedHostsService {
       }))
     );
 
+    // For collective events, return all hosts as fixed hosts without any filtering
+    if (isCollective) {
+      return {
+        qualifiedRRHosts: [],
+        fixedHosts: dedupeByUserId(ensureHostProperties(normalizedHosts)),
+      };
+    }
+
     // not a team event type, or some other reason - segment matching isn't necessary.
     if (!originalNormalizedHosts) {
       const fixedHosts = ensureHostProperties(
