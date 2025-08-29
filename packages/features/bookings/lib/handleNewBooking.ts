@@ -330,6 +330,18 @@ export const buildEventForTeamEventType = async ({
 
   const teamMembers = await Promise.all(teamMemberPromises);
 
+  // Ensure collective events include destination calendars of all non-organizer hosts
+  if (schedulingType === "COLLECTIVE") {
+    for (const user of eventTypeWithUsers?.users ?? []) {
+      if (user.email !== organizerUser.email && user.destinationCalendar) {
+        teamDestinationCalendars.push({
+          ...user.destinationCalendar,
+          externalId: processExternalId(user.destinationCalendar),
+        });
+      }
+    }
+  }
+
   const updatedEvt = CalendarEventBuilder.fromEvent(evt)
     ?.withDestinationCalendar([...(evt.destinationCalendar ?? []), ...teamDestinationCalendars])
     .build();
@@ -1020,9 +1032,18 @@ async function handler(
       const nonEmptyHostGroups = Object.fromEntries(
         Object.entries(hostGroups).filter(([groupId, hosts]) => hosts.length > 0)
       );
-      // Only throw error if there are no available hosts at all (neither fixed nor round-robin)
-      if (users.length === 0) {
-        throw new Error(ErrorCode.RoundRobinHostsUnavailableForBooking);
+      // For collective events, if any required fixed host is missing from availability, fail
+      if (eventType.schedulingType === SchedulingType.COLLECTIVE) {
+        const numFixedHosts = eventTypeWithUsers.hosts.filter((h) => h.isFixed).length;
+        const numAvailableFixedHosts = fixedUserPool.length;
+        if (numFixedHosts > 0 && numAvailableFixedHosts < numFixedHosts) {
+          throw new Error(ErrorCode.FixedHostsUnavailableForBooking);
+        }
+      } else {
+        // Only throw error if there are no available hosts at all (neither fixed nor round-robin)
+        if (users.length === 0) {
+          throw new Error(ErrorCode.RoundRobinHostsUnavailableForBooking);
+        }
       }
 
       // Pushing fixed user before the luckyUser guarantees the (first) fixed user as the organizer.
