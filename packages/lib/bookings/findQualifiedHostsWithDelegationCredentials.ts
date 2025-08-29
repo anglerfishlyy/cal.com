@@ -7,7 +7,7 @@ import type { EventType } from "@calcom/lib/bookings/getRoutedUsers";
 import { withReporting } from "@calcom/lib/sentryWrapper";
 import type { BookingRepository } from "@calcom/lib/server/repository/booking";
 import type { SelectedCalendar } from "@calcom/prisma/client";
-import type { SchedulingType } from "@calcom/prisma/enums";
+import { SchedulingType } from "@calcom/prisma/enums";
 import type { CredentialForCalendarService, CredentialPayload } from "@calcom/types/Credential";
 
 import type { RoutingFormResponse } from "../server/getLuckyUser";
@@ -28,22 +28,40 @@ type Host<T> = {
   user: T;
 };
 
+// normalize helpers
+const ensureHostProperties = <
+  T extends {
+    user: { id: number };
+    isFixed?: boolean;
+    createdAt?: Date | null;
+    groupId?: string | null;
+    priority?: number | null;
+    weight?: number | null;
+  }
+>(
+  arr: T[]
+) =>
+  arr.map((h) => ({
+    ...h,
+    isFixed: h.isFixed === true, // make it explicit boolean
+    createdAt: h.createdAt ?? null, // do not invent "now" here (affects fairness)
+    groupId: h.groupId ?? null,
+    priority: h.priority ?? null,
+    weight: h.weight ?? null,
+  }));
+
+const dedupeByUserId = <T extends { user: { id: number } }>(arr: T[]) => {
+  const m = new Map<number, T>();
+  for (const h of arr) if (!m.has(h.user.id)) m.set(h.user.id, h);
+  return Array.from(m.values());
+};
+
 // In case we don't have any matching team members, we return all the RR hosts, as we always want the team event to be bookable.
 // Each filter is filtered down, but we never return 0-length.
 // TODO: We should notify about it to the organizer somehow.
 function applyFilterWithFallback<T>(currentValue: T[], newValue: T[]): T[] {
   return newValue.length > 0 ? newValue : currentValue;
 }
-
-// Helper to ensure all host objects have the required properties
-const ensureHostProperties = <T extends { user: any; isFixed: boolean }>(arr: T[]) =>
-  arr.map((h) => ({
-    ...h,
-    priority: (h as any).priority !== undefined ? (h as any).priority : null,
-    weight: (h as any).weight !== undefined ? (h as any).weight : null,
-    createdAt: (h as any).createdAt !== undefined ? (h as any).createdAt : null,
-    groupId: (h as any).groupId !== undefined ? (h as any).groupId : null,
-  }));
 
 function getFallBackWithContactOwner<T extends { user: { id: number } }>(
   fallbackHosts: T[],
@@ -124,99 +142,97 @@ export class QualifiedHostsService {
       user: Omit<T, "credentials"> & { credentials: CredentialForCalendarService[] };
     }[];
   }> {
-    const { hosts: normalizedHosts, fallbackHosts: fallbackUsers } =
+    const { hosts: originalNormalizedHosts, fallbackHosts: fallbackUsers } =
       await getNormalizedHostsWithDelegationCredentials({
         eventType,
       });
+
+    // Force fixed for collective
+    const isCollective = eventType.schedulingType === SchedulingType.COLLECTIVE;
+
+    const normalizedHosts = ensureHostProperties(
+      (eventType.hosts ?? []).map((h) => ({
+        user: h.user, // already loaded user with credentials by existing code
+        isFixed: isCollective ? true : h.isFixed ?? false, // ← critical
+        priority: h.priority ?? null,
+        weight: h.weight ?? null,
+        createdAt: h.createdAt ?? null,
+        groupId: h.groupId ?? null,
+      }))
+    );
+
     // not a team event type, or some other reason - segment matching isn't necessary.
-    if (!normalizedHosts) {
-      const fixedHosts = fallbackUsers.filter(isFixedHost).map((h) => ({
-        isFixed: true,
-        user: h.user,
-        // keep tests expecting original shape (email present, no groupId/priority/weight)
-        email: (h as any).email,
-        createdAt: h.createdAt ?? null,
-        priority: null,
-        weight: null,
-        groupId: null,
-      }));
-      const roundRobinHosts = fallbackUsers.filter(isRoundRobinHost).map((h) => ({
-        isFixed: false,
-        user: h.user,
-        createdAt: h.createdAt ?? null,
-        priority: null,
-        weight: null,
-        groupId: null,
-      }));
-      return { qualifiedRRHosts: roundRobinHosts, fixedHosts };
+    if (!originalNormalizedHosts) {
+      const fixedHosts = ensureHostProperties(
+        fallbackUsers.filter(isFixedHost).map((h) => ({
+          isFixed: true,
+          user: h.user,
+          // keep tests expecting original shape (email present, no groupId/priority/weight)
+          email: (h as any).email,
+          createdAt: h.createdAt ?? null,
+          priority: null,
+          weight: null,
+          groupId: null,
+        }))
+      );
+      const roundRobinHosts = ensureHostProperties(
+        fallbackUsers.filter(isRoundRobinHost).map((h) => ({
+          isFixed: false,
+          user: h.user,
+          createdAt: h.createdAt ?? null,
+          priority: null,
+          weight: null,
+          groupId: null,
+        }))
+      );
+      return {
+        qualifiedRRHosts: dedupeByUserId(ensureHostProperties(roundRobinHosts)),
+        fixedHosts: dedupeByUserId(ensureHostProperties(fixedHosts)),
+      };
     }
 
-    // Ensure isFixed is always a boolean
-    const normalizedHostsWithFixedBoolean = normalizedHosts.map((host) => ({
-      ...host,
-      isFixed: host.isFixed ?? false,
-    }));
-
-    const fixedHosts = ensureHostProperties(
-      normalizedHostsWithFixedBoolean.filter(isFixedHost).map((h) => ({
-        isFixed: true,
-        user: h.user,
-        priority: h.priority ?? null,
-        weight: h.weight ?? null,
-        createdAt: h.createdAt ?? null,
-        groupId: h.groupId ?? null,
-      }))
-    );
-    const roundRobinHosts = ensureHostProperties(
-      normalizedHostsWithFixedBoolean.filter(isRoundRobinHost).map((h) => ({
-        isFixed: false,
-        user: h.user,
-        priority: h.priority ?? null,
-        weight: h.weight ?? null,
-        createdAt: h.createdAt ?? null,
-        groupId: h.groupId ?? null,
-      }))
-    );
+    // Build RR vs fixed explicitly and normalize
+    const fixedHosts = ensureHostProperties(normalizedHosts.filter((h) => h.isFixed === true));
+    const roundRobinHosts = ensureHostProperties(normalizedHosts.filter((h) => h.isFixed !== true));
 
     // If it is rerouting, we should not force reschedule with same host.
-    const hostsAfterRescheduleWithSameRoundRobinHost = applyFilterWithFallback(
-      roundRobinHosts,
-      await this.dependencies.filterHostsService.filterHostsBySameRoundRobinHost({
-        hosts: roundRobinHosts,
-        rescheduleUid,
-        rescheduleWithSameRoundRobinHost: eventType.rescheduleWithSameRoundRobinHost,
-        routedTeamMemberIds,
-      })
+    const hostsAfterRescheduleWithSameRoundRobinHost = dedupeByUserId(
+      ensureHostProperties(
+        applyFilterWithFallback(
+          roundRobinHosts,
+          await this.dependencies.filterHostsService.filterHostsBySameRoundRobinHost({
+            hosts: roundRobinHosts,
+            rescheduleUid,
+            rescheduleWithSameRoundRobinHost: eventType.rescheduleWithSameRoundRobinHost,
+            routedTeamMemberIds,
+          })
+        )
+      )
     );
 
     if (hostsAfterRescheduleWithSameRoundRobinHost.length === 1) {
       return {
-        qualifiedRRHosts: hostsAfterRescheduleWithSameRoundRobinHost,
-        fixedHosts,
+        qualifiedRRHosts: dedupeByUserId(ensureHostProperties(hostsAfterRescheduleWithSameRoundRobinHost)),
+        fixedHosts: dedupeByUserId(ensureHostProperties(fixedHosts)),
       };
     }
 
-    const hostsAfterSegmentMatching = ensureHostProperties(
-      applyFilterWithFallback(
-        hostsAfterRescheduleWithSameRoundRobinHost,
-        (await findMatchingHostsWithEventSegment({
-          eventType,
-          hosts: hostsAfterRescheduleWithSameRoundRobinHost.map((h) => ({
-            isFixed: h.isFixed,
-            user: h.user,
-            priority: h.priority ?? null,
-            weight: h.weight ?? null,
-            createdAt: h.createdAt ?? null,
-            groupId: h.groupId ?? null,
-          })),
-        })) as typeof hostsAfterRescheduleWithSameRoundRobinHost
+    const hostsAfterSegmentMatching = dedupeByUserId(
+      ensureHostProperties(
+        applyFilterWithFallback(
+          hostsAfterRescheduleWithSameRoundRobinHost,
+          (await findMatchingHostsWithEventSegment({
+            eventType,
+            hosts: hostsAfterRescheduleWithSameRoundRobinHost,
+          })) as typeof hostsAfterRescheduleWithSameRoundRobinHost
+        )
       )
     );
 
     if (hostsAfterSegmentMatching.length === 1) {
       return {
-        qualifiedRRHosts: hostsAfterSegmentMatching,
-        fixedHosts,
+        qualifiedRRHosts: dedupeByUserId(ensureHostProperties(hostsAfterSegmentMatching)),
+        fixedHosts: dedupeByUserId(ensureHostProperties(fixedHosts)),
       };
     }
 
@@ -225,69 +241,79 @@ export class QualifiedHostsService {
       ? hostsAfterSegmentMatching
       : hostsAfterRescheduleWithSameRoundRobinHost;
 
-    const hostsAfterContactOwnerMatching = ensureHostProperties(
-      applyFilterWithFallback(
-        officalRRHosts,
-        officalRRHosts.filter((host) => host.user.email === contactOwnerEmail)
+    const hostsAfterContactOwnerMatching = dedupeByUserId(
+      ensureHostProperties(
+        applyFilterWithFallback(
+          officalRRHosts,
+          officalRRHosts.filter((host) => host.user.email === contactOwnerEmail)
+        )
       )
     );
 
-    const hostsAfterRoutedTeamMemberIdsMatching = ensureHostProperties(
-      applyFilterWithFallback(
-        officalRRHosts,
-        officalRRHosts.filter((host) => routedTeamMemberIds.includes(host.user.id))
+    const hostsAfterRoutedTeamMemberIdsMatching = dedupeByUserId(
+      ensureHostProperties(
+        applyFilterWithFallback(
+          officalRRHosts,
+          officalRRHosts.filter((host) => routedTeamMemberIds.includes(host.user.id))
+        )
       )
     );
 
     if (hostsAfterRoutedTeamMemberIdsMatching.length === 1) {
       if (hostsAfterContactOwnerMatching.length === 1) {
         return {
-          qualifiedRRHosts: hostsAfterContactOwnerMatching,
-          allFallbackRRHosts: ensureHostProperties(
-            getFallBackWithContactOwner(
-              hostsAfterRoutedTeamMemberIdsMatching,
-              hostsAfterContactOwnerMatching[0]
+          qualifiedRRHosts: dedupeByUserId(ensureHostProperties(hostsAfterContactOwnerMatching)),
+          allFallbackRRHosts: dedupeByUserId(
+            ensureHostProperties(
+              getFallBackWithContactOwner(
+                hostsAfterRoutedTeamMemberIdsMatching,
+                hostsAfterContactOwnerMatching[0]
+              )
             )
           ),
-          fixedHosts,
+          fixedHosts: dedupeByUserId(ensureHostProperties(fixedHosts)),
         };
       }
       return {
-        qualifiedRRHosts: hostsAfterRoutedTeamMemberIdsMatching,
-        fixedHosts,
+        qualifiedRRHosts: dedupeByUserId(ensureHostProperties(hostsAfterRoutedTeamMemberIdsMatching)),
+        fixedHosts: dedupeByUserId(ensureHostProperties(fixedHosts)),
       };
     }
 
-    const hostsAfterFairnessMatching = ensureHostProperties(
-      applyFilterWithFallback(
-        hostsAfterRoutedTeamMemberIdsMatching,
-        await filterHostsByLeadThreshold({
-          eventType,
-          hosts: hostsAfterRoutedTeamMemberIdsMatching,
-          maxLeadThreshold: eventType.maxLeadThreshold ?? null,
-          routingFormResponse,
-        })
+    const hostsAfterFairnessMatching = dedupeByUserId(
+      ensureHostProperties(
+        applyFilterWithFallback(
+          hostsAfterRoutedTeamMemberIdsMatching,
+          await filterHostsByLeadThreshold({
+            eventType,
+            hosts: hostsAfterRoutedTeamMemberIdsMatching,
+            maxLeadThreshold: eventType.maxLeadThreshold ?? null,
+            routingFormResponse,
+          })
+        )
       )
     );
 
     if (hostsAfterContactOwnerMatching.length === 1) {
       return {
-        qualifiedRRHosts: hostsAfterContactOwnerMatching,
-        allFallbackRRHosts: ensureHostProperties(
-          getFallBackWithContactOwner(hostsAfterFairnessMatching, hostsAfterContactOwnerMatching[0])
+        qualifiedRRHosts: dedupeByUserId(ensureHostProperties(hostsAfterContactOwnerMatching)),
+        allFallbackRRHosts: dedupeByUserId(
+          ensureHostProperties(
+            getFallBackWithContactOwner(hostsAfterFairnessMatching, hostsAfterContactOwnerMatching[0])
+          )
         ),
-        fixedHosts,
+        fixedHosts: dedupeByUserId(ensureHostProperties(fixedHosts)),
       };
     }
 
     return {
-      qualifiedRRHosts: hostsAfterFairnessMatching,
+      qualifiedRRHosts: dedupeByUserId(ensureHostProperties(hostsAfterFairnessMatching)),
       // only if fairness filtering is active
       allFallbackRRHosts:
         hostsAfterFairnessMatching.length !== hostsAfterRoutedTeamMemberIdsMatching.length
-          ? hostsAfterRoutedTeamMemberIdsMatching
+          ? dedupeByUserId(ensureHostProperties(hostsAfterRoutedTeamMemberIdsMatching))
           : undefined,
-      fixedHosts,
+      fixedHosts: dedupeByUserId(ensureHostProperties(fixedHosts)),
     };
   }
 
