@@ -823,6 +823,27 @@ async function handler(
     }
 
     if (!input.bookingData.allRecurringDates || input.bookingData.isFirstRecurringSlot) {
+      // For collective events, check if all required fixed hosts are available before proceeding
+      if (eventType.schedulingType === SchedulingType.COLLECTIVE) {
+        const allRequiredHosts = [...qualifiedRRUsers, ...fixedUsers];
+        const allRequiredHostsAvailability = await ensureAvailableUsers(
+          { ...eventTypeWithUsers, users: allRequiredHosts as IsFixedAwareUser[] },
+          {
+            dateFrom: dayjs(reqBody.start).tz(reqBody.timeZone).format(),
+            dateTo: dayjs(reqBody.end).tz(reqBody.timeZone).format(),
+            timeZone: reqBody.timeZone,
+            originalRescheduledBooking,
+          },
+          loggerWithEventDetails,
+          shouldServeCache
+        );
+
+        // If not all required hosts are available, fail immediately
+        if (allRequiredHostsAvailability.length < allRequiredHosts.length) {
+          throw new Error(ErrorCode.FixedHostsUnavailableForBooking);
+        }
+      }
+
       try {
         availableUsers = await ensureAvailableUsers(
           { ...eventTypeWithUsers, users: [...qualifiedRRUsers, ...fixedUsers] as IsFixedAwareUser[] },
@@ -884,6 +905,7 @@ async function handler(
       if (eventType.schedulingType === SchedulingType.COLLECTIVE) {
         const requiredFixedHosts = eventTypeWithUsers.hosts.filter((h) => h.isFixed).length;
         const availableFixedHosts = fixedUserPool.length;
+        // For collective events, fail if ANY required fixed host is unavailable
         if (requiredFixedHosts > 0 && availableFixedHosts < requiredFixedHosts) {
           throw new Error(ErrorCode.FixedHostsUnavailableForBooking);
         }
