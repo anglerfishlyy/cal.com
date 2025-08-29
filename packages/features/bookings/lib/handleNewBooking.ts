@@ -890,6 +890,15 @@ async function handler(
         host?.isFixed ? fixedUserPool.push(userWithFixedFlag) : nonFixedUsers.push(userWithFixedFlag);
       });
 
+      // For collective events, ALL hosts are fixed and must be available
+      if (eventType.schedulingType === SchedulingType.COLLECTIVE) {
+        const requiredFixedHosts = eventTypeWithUsers.hosts.filter((h) => h.isFixed).length;
+        const availableFixedHosts = fixedUserPool.length;
+        if (requiredFixedHosts > 0 && availableFixedHosts < requiredFixedHosts) {
+          throw new Error(ErrorCode.FixedHostsUnavailableForBooking);
+        }
+      }
+
       // Group ALL hosts by their group IDs, then filter to only include available users
       const allHostsGrouped = groupHostsByGroupId({
         hosts: eventTypeWithUsers.hosts.filter((host) => !host.isFixed),
