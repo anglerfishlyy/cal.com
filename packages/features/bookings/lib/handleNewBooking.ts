@@ -330,17 +330,7 @@ export const buildEventForTeamEventType = async ({
 
   const teamMembers = await Promise.all(teamMemberPromises);
 
-  // Ensure collective events include destination calendars of all non-organizer hosts
-  if (schedulingType === "COLLECTIVE") {
-    for (const user of eventTypeWithUsers?.users ?? []) {
-      if (user.email !== organizerUser.email && user.destinationCalendar) {
-        teamDestinationCalendars.push({
-          ...user.destinationCalendar,
-          externalId: processExternalId(user.destinationCalendar),
-        });
-      }
-    }
-  }
+  // Note: Destination calendars are already handled in the loop above for collective events
 
   const updatedEvt = CalendarEventBuilder.fromEvent(evt)
     ?.withDestinationCalendar([...(evt.destinationCalendar ?? []), ...teamDestinationCalendars])
