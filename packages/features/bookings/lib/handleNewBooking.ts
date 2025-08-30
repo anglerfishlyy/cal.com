@@ -897,8 +897,10 @@ async function handler(
 
       availableUsers.forEach((user) => {
         const host = eventTypeWithUsers.hosts.find((h) => h.user.id === user.id);
-        const userWithFixedFlag = { ...user, isFixed: !!host?.isFixed } as IsFixedAwareUser;
-        host?.isFixed ? fixedUserPool.push(userWithFixedFlag) : nonFixedUsers.push(userWithFixedFlag);
+        // For collective events, treat all hosts as fixed
+        const isFixed = eventType.schedulingType === SchedulingType.COLLECTIVE ? true : !!host?.isFixed;
+        const userWithFixedFlag = { ...user, isFixed } as IsFixedAwareUser;
+        isFixed ? fixedUserPool.push(userWithFixedFlag) : nonFixedUsers.push(userWithFixedFlag);
       });
 
       // For collective events, ALL hosts are fixed and must be available
